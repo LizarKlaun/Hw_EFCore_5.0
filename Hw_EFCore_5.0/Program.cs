@@ -1,15 +1,20 @@
-﻿using Hw_EFCore_5._0.Entities;
+﻿using Dapper;
+using Hw_EFCore_5._0.Entities;
+using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 
 namespace Hw_EFCore_5._0
 {
     internal class Program
     {
+        private static readonly string connectionString = "Data Source=dogshelter.db";
+
         static void Main(string[] args)
         {
             while (true)
             {
                 Console.Clear();
-                Console.WriteLine("--- Меню Притулку для Собак ---");
+                Console.WriteLine("--- Притулок для Собак (Dapper & SQLite) ---");
                 Console.WriteLine("1. Додати собаку");
                 Console.WriteLine("2. Оновити дані собаки за ID");
                 Console.WriteLine("3. Переглянути всіх собак");
@@ -23,138 +28,99 @@ namespace Hw_EFCore_5._0
 
                 switch (choice)
                 {
-                    case "1":
-                        AddDog();
-                        break;
-                    case "2":
-                        UpdateDog();
-                        break;
-                    case "3":
-                        ViewAllDogs();
-                        break;
-                    case "4":
-                        ViewDogsInShelter();
-                        break;
-                    case "5":
-                        ViewAdoptedDogs();
-                        break;
-                    case "6":
-                        ShowSearchMenu();
-                        break;
-                    case "0":
-                        Console.WriteLine("Дякуємо, що завітали!");
-                        return;
-                    default:
-                        Console.WriteLine("Невірний вибір. Спробуйте ще раз.");
-                        break;
+                    case "1": AddDog(); break;
+                    case "2": UpdateDog(); break;
+                    case "3": ViewAllDogs(); break;
+                    case "4": ViewDogsInShelter(); break;
+                    case "5": ViewAdoptedDogs(); break;
+                    case "6": ShowSearchMenu(); break;
+                    case "0": return;
+                    default: Console.WriteLine("Невірний вибір. Спробуйте ще раз."); break;
                 }
                 WaitForEnter();
             }
+        }
+
+
+        static void InitializeDatabase()
+        {
+            using var connection = new SqliteConnection(connectionString);
+            var sql = @"
+            CREATE TABLE IF NOT EXISTS Dogs (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Name TEXT NOT NULL,
+                Age INTEGER NOT NULL,
+                Breed TEXT NOT NULL,
+                IsAdopted BOOLEAN NOT NULL DEFAULT 0
+            )";
+            connection.Execute(sql);
         }
 
         static void AddDog()
         {
             Console.Clear();
             Console.WriteLine("--- Додавання нової собаки ---");
-            try
+            Console.Write("Введіть кличку: "); string name = Console.ReadLine();
+            Console.Write("Введіть вік: "); int age = int.Parse(Console.ReadLine());
+            Console.Write("Введіть породу: "); string breed = Console.ReadLine();
+
+            var sql = "INSERT INTO Dogs (Name, Age, Breed) VALUES (@Name, @Age, @Breed);";
+
+            using (var connection = new SqliteConnection(connectionString))
             {
-                Console.Write("Введіть кличку: ");
-                string name = Console.ReadLine();
-
-                Console.Write("Введіть вік (повних років): ");
-                int age = int.Parse(Console.ReadLine());
-
-                Console.Write("Введіть породу: ");
-                string breed = Console.ReadLine();
-
-                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(breed))
-                {
-                    Console.WriteLine("Кличка та порода не можуть бути пустими.");
-                    return;
-                }
-
-                var newDog = new Dog { Name = name, Age = age, Breed = breed };
-
-                using (var context = new ShelterContext())
-                {
-                    context.Dogs.Add(newDog);
-                    context.SaveChanges();
-                }
-                Console.WriteLine("\nСобаку успішно додано!");
+                connection.Execute(sql, new { Name = name, Age = age, Breed = breed });
             }
-            catch (FormatException)
-            {
-                Console.WriteLine("\nПомилка: Вік має бути числом.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"\nСталася помилка: {ex.Message}");
-            }
+
+            Console.WriteLine("\nСобаку успішно додано!");
         }
 
         static void UpdateDog()
         {
-            Console.Clear();
-            Console.WriteLine("--- Оновлення даних собаки ---");
             Console.Write("Введіть ID собаки для оновлення: ");
-            if (!int.TryParse(Console.ReadLine(), out int id))
-            {
-                Console.WriteLine("Невірний формат ID.");
-                return;
-            }
+            int id = int.Parse(Console.ReadLine());
 
-            using (var context = new ShelterContext())
+            using (var connection = new SqliteConnection(connectionString))
             {
-                var dog = context.Dogs.Find(id);
+                var dog = connection.QueryFirstOrDefault<Dog>("SELECT * FROM Dogs WHERE Id = @Id;", new { Id = id });
+
                 if (dog == null)
                 {
-                    Console.WriteLine("Собаку з таким ID не знайдено.");
+                    Console.WriteLine("Собаку не знайдено.");
                     return;
                 }
 
                 Console.WriteLine($"Поточні дані: {dog}");
-                try
-                {
-                    Console.Write($"Нова кличка (поточна: {dog.Name}): ");
-                    dog.Name = Console.ReadLine();
+                Console.Write($"Нова кличка (поточна: {dog.Name}): "); dog.Name = Console.ReadLine();
+                Console.Write($"Новий вік (поточний: {dog.Age}): "); dog.Age = int.Parse(Console.ReadLine());
+                Console.Write("Собаку прилаштовано? (y/n): ");
+                dog.IsAdopted = Console.ReadLine().ToLower() == "y";
 
-                    Console.Write($"Новий вік (поточний: {dog.Age}): ");
-                    dog.Age = int.Parse(Console.ReadLine());
+                var sql = "UPDATE Dogs SET Name = @Name, Age = @Age, Breed = @Breed, IsAdopted = @IsAdopted WHERE Id = @Id;";
+                connection.Execute(sql, dog);
 
-                    Console.Write($"Нова порода (поточна: {dog.Breed}): ");
-                    dog.Breed = Console.ReadLine();
-
-                    Console.Write($"Собаку прилаштовано? (y/n, поточний: {(dog.IsAdopted ? 'y' : 'n')}): ");
-                    string adoptedChoice = Console.ReadLine().ToLower();
-                    if (adoptedChoice == "y") dog.IsAdopted = true;
-                    else if (adoptedChoice == "n") dog.IsAdopted = false;
-
-                    context.SaveChanges();
-                    Console.WriteLine("\nДані успішно оновлено!");
-                }
-                catch (FormatException)
-                {
-                    Console.WriteLine("\nПомилка: Вік має бути числом.");
-                }
+                Console.WriteLine("\nДані оновлено!");
             }
         }
 
         static void ViewAllDogs()
         {
-            using var context = new ShelterContext();
-            PrintDogList("--- Всі собаки в базі ---", context.Dogs.ToList());
+            using var connection = new SqliteConnection(connectionString);
+            var dogs = connection.Query<Dog>("SELECT * FROM Dogs;").ToList();
+            PrintDogList("--- Всі собаки в базі ---", dogs);
         }
 
         static void ViewDogsInShelter()
         {
-            using var context = new ShelterContext();
-            PrintDogList("--- Собаки, що чекають на сім'ю ---", context.Dogs.Where(d => !d.IsAdopted).ToList());
+            using var connection = new SqliteConnection(connectionString);
+            var dogs = connection.Query<Dog>("SELECT * FROM Dogs WHERE IsAdopted = 0;").ToList();
+            PrintDogList("--- Собаки, що чекають на сім'ю ---", dogs);
         }
 
         static void ViewAdoptedDogs()
         {
-            using var context = new ShelterContext();
-            PrintDogList("--- Собаки, що знайшли дім ---", context.Dogs.Where(d => d.IsAdopted).ToList());
+            using var connection = new SqliteConnection(connectionString);
+            var dogs = connection.Query<Dog>("SELECT * FROM Dogs WHERE IsAdopted = 1;").ToList();
+            PrintDogList("--- Собаки, що знайшли дім ---", dogs);
         }
 
         static void ShowSearchMenu()
@@ -167,8 +133,8 @@ namespace Hw_EFCore_5._0
             Console.Write("\nВаш вибір: ");
             string choice = Console.ReadLine();
 
-            using var context = new ShelterContext();
             List<Dog> results = new List<Dog>();
+            using var connection = new SqliteConnection(connectionString);
 
             switch (choice)
             {
@@ -176,25 +142,19 @@ namespace Hw_EFCore_5._0
                     Console.Write("Введіть ID: ");
                     if (int.TryParse(Console.ReadLine(), out int id))
                     {
-                        var dog = context.Dogs.Find(id);
+                        var dog = connection.QueryFirstOrDefault<Dog>("SELECT * FROM Dogs WHERE Id = @Id;", new { Id = id });
                         if (dog != null) results.Add(dog);
                     }
                     break;
                 case "2":
                     Console.Write("Введіть кличку (або її частину): ");
                     string name = Console.ReadLine();
-                    if (!string.IsNullOrWhiteSpace(name))
-                    {
-                        results = context.Dogs.Where(d => d.Name.Contains(name)).ToList();
-                    }
+                    results = connection.Query<Dog>("SELECT * FROM Dogs WHERE Name LIKE @SearchTerm;", new { SearchTerm = $"%{name}%" }).ToList();
                     break;
                 case "3":
                     Console.Write("Введіть породу: ");
                     string breed = Console.ReadLine();
-                    if (!string.IsNullOrWhiteSpace(breed))
-                    {
-                        results = context.Dogs.Where(d => d.Breed.ToLower() == breed.ToLower()).ToList();
-                    }
+                    results = connection.Query<Dog>("SELECT * FROM Dogs WHERE Breed = @Breed;", new { Breed = breed }).ToList();
                     break;
                 default:
                     Console.WriteLine("Невірний вибір.");
@@ -215,10 +175,7 @@ namespace Hw_EFCore_5._0
             }
             else
             {
-                foreach (var dog in dogs)
-                {
-                    Console.WriteLine(dog);
-                }
+                dogs.ForEach(Console.WriteLine);
             }
         }
 
@@ -228,5 +185,4 @@ namespace Hw_EFCore_5._0
             Console.ReadLine();
         }
     }
-
 }

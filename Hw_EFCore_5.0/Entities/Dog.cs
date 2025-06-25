@@ -11,12 +11,10 @@ namespace Hw_EFCore_5._0.Entities
     {
         public int Id { get; set; }
 
-        [Required]
         public string Name { get; set; }
 
         public int Age { get; set; }
 
-        [Required]
         public string Breed { get; set; }
 
         public bool IsAdopted { get; set; }
